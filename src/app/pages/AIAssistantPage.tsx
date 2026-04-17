@@ -1,533 +1,491 @@
 import { useState, useRef, useEffect } from 'react';
-import { motion, useScroll, useTransform, useSpring } from 'motion/react';
-import { 
-  MessageSquare, 
-  Send, 
-  Sparkles, 
-  Bot, 
-  User, 
-  Zap,
-  Brain,
-  Globe,
-  BookOpen,
-  Wand2
+import { motion, AnimatePresence } from 'motion/react';
+import {
+  Send, Sparkles, Bot, User, Brain, Globe, BookOpen, Wand2,
+  Volume2, Copy, Check, Zap, Languages, ArrowRightLeft, Loader2,
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Textarea } from '../components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { toast } from 'sonner';
-import { projectId, publicAnonKey } from '/utils/supabase/info';
+import { translateRapidApi } from '/utils/rapidApiTranslate';
+import { translateMyMemory, toMyMemoryCode } from '/utils/translateMyMemory';
+import { appendTranslationHistory } from '/utils/translationHistory';
 
-// Language options
 const languages = [
-  { code: 'en', name: 'English', flag: '🇬🇧' },
-  { code: 'es', name: 'Spanish', flag: '🇪🇸' },
-  { code: 'fr', name: 'French', flag: '🇫🇷' },
-  { code: 'de', name: 'German', flag: '🇩🇪' },
-  { code: 'ja', name: 'Japanese', flag: '🇯🇵' },
-  { code: 'zh-Hans', name: 'Chinese', flag: '🇨🇳' },
+  { code: 'en',      name: 'English',    flag: '🇬🇧' },
+  { code: 'hi',      name: 'Hindi',      flag: '🇮🇳' },
+  { code: 'mr',      name: 'Marathi',    flag: '🇮🇳' },
+  { code: 'es',      name: 'Spanish',    flag: '🇪🇸' },
+  { code: 'fr',      name: 'French',     flag: '🇫🇷' },
+  { code: 'de',      name: 'German',     flag: '🇩🇪' },
+  { code: 'it',      name: 'Italian',    flag: '🇮🇹' },
+  { code: 'pt',      name: 'Portuguese', flag: '🇵🇹' },
+  { code: 'ru',      name: 'Russian',    flag: '🇷🇺' },
+  { code: 'ja',      name: 'Japanese',   flag: '🇯🇵' },
+  { code: 'ko',      name: 'Korean',     flag: '🇰🇷' },
+  { code: 'zh-Hans', name: 'Chinese',    flag: '🇨🇳' },
+  { code: 'ar',      name: 'Arabic',     flag: '🇸🇦' },
+  { code: 'bn',      name: 'Bengali',    flag: '🇧🇩' },
+  { code: 'tr',      name: 'Turkish',    flag: '🇹🇷' },
+  { code: 'nl',      name: 'Dutch',      flag: '🇳🇱' },
+  { code: 'pl',      name: 'Polish',     flag: '🇵🇱' },
+  { code: 'th',      name: 'Thai',       flag: '🇹🇭' },
+  { code: 'vi',      name: 'Vietnamese', flag: '🇻🇳' },
+  { code: 'sv',      name: 'Swedish',    flag: '🇸🇪' },
 ];
 
 interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  translation?: string;
+  provider?: string;
   timestamp: Date;
-  detailedInfo?: any;
+  cards?: InfoCard[];
 }
 
-// Floating cartoon character component
-function FloatingCharacter({ delay = 0 }: { delay?: number }) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0 }}
-      animate={{ 
-        opacity: 1, 
-        scale: 1,
-        y: [0, -20, 0],
-        rotate: [0, 5, -5, 0]
-      }}
-      transition={{
-        duration: 3,
-        repeat: Infinity,
-        delay,
-        ease: "easeInOut"
-      }}
-      className="absolute"
-    >
-      <div className="relative">
-        <motion.div
-          animate={{
-            boxShadow: [
-              '0 0 20px rgba(59, 130, 246, 0.5)',
-              '0 0 40px rgba(147, 51, 234, 0.5)',
-              '0 0 20px rgba(59, 130, 246, 0.5)',
-            ]
-          }}
-          transition={{ duration: 2, repeat: Infinity }}
-          className="w-24 h-24 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center"
-        >
-          <Sparkles className="w-12 h-12 text-white" />
-        </motion.div>
-        {/* Sparkle particles */}
-        <motion.div
-          animate={{
-            scale: [1, 1.2, 1],
-            opacity: [0.5, 1, 0.5]
-          }}
-          transition={{ duration: 2, repeat: Infinity }}
-          className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-yellow-400"
-        />
-        <motion.div
-          animate={{
-            scale: [1, 1.3, 1],
-            opacity: [0.5, 1, 0.5]
-          }}
-          transition={{ duration: 2, repeat: Infinity, delay: 0.5 }}
-          className="absolute -bottom-2 -left-2 w-4 h-4 rounded-full bg-pink-400"
-        />
-      </div>
-    </motion.div>
-  );
+interface InfoCard {
+  label: string;
+  value: string;
+  color: string;
 }
 
-// 3D Scroll Card Component
-function ScrollCard3D({ children, index }: { children: React.ReactNode; index: number }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const { scrollYProgress } = useScroll({
-    target: ref,
-    offset: ["start end", "end start"]
-  });
+// ── Core translation engine ───────────────────────────────────────────────────
 
-  const y = useTransform(scrollYProgress, [0, 1], [100, -100]);
-  const opacity = useTransform(scrollYProgress, [0, 0.2, 0.8, 1], [0, 1, 1, 0]);
-  const scale = useTransform(scrollYProgress, [0, 0.2, 0.8, 1], [0.8, 1, 1, 0.8]);
-  const rotateX = useTransform(scrollYProgress, [0, 0.5, 1], [15, 0, -15]);
+async function performTranslation(
+  text: string, from: string, to: string
+): Promise<{ translated: string; provider: string }> {
+  // 1. RapidAPI (Google Translate) — most accurate
+  try {
+    const r = await translateRapidApi(text, from, to);
+    if (r.translatedText && r.translatedText !== text) {
+      return { translated: r.translatedText, provider: 'Google Translate (RapidAPI)' };
+    }
+  } catch { /* fall through */ }
 
-  return (
-    <motion.div
-      ref={ref}
-      style={{ 
-        y: useSpring(y, { stiffness: 100, damping: 30 }),
-        opacity,
-        scale: useSpring(scale, { stiffness: 100, damping: 30 }),
-        rotateX: useSpring(rotateX, { stiffness: 100, damping: 30 }),
-        transformStyle: 'preserve-3d',
-        transformPerspective: 1000
-      }}
-    >
-      {children}
-    </motion.div>
-  );
+  // 2. MyMemory — free fallback
+  try {
+    const fromCode = from === 'auto' ? 'en' : toMyMemoryCode(from);
+    const t = await translateMyMemory(text, fromCode, to);
+    if (t && t !== text) return { translated: t, provider: 'MyMemory' };
+  } catch { /* fall through */ }
+
+  throw new Error('All translation engines failed. Please check your connection.');
 }
+
+// ── Build rich AI response cards ─────────────────────────────────────────────
+
+function buildInfoCards(text: string, translated: string, from: string, to: string): InfoCard[] {
+  const fromLang = languages.find(l => l.code === from);
+  const toLang   = languages.find(l => l.code === to);
+  const wordCount = text.trim().split(/\s+/).length;
+  const charCount = text.length;
+
+  const cards: InfoCard[] = [
+    { label: '📝 Original', value: text, color: 'border-blue-500/40 bg-blue-500/10' },
+    { label: `✨ ${toLang?.flag ?? ''} ${toLang?.name ?? to} Translation`, value: translated, color: 'border-green-500/40 bg-green-500/10' },
+    { label: '📊 Stats', value: `${wordCount} word${wordCount !== 1 ? 's' : ''} · ${charCount} characters`, color: 'border-purple-500/40 bg-purple-500/10' },
+    { label: '🌐 Language Pair', value: `${fromLang?.flag ?? ''} ${fromLang?.name ?? from} → ${toLang?.flag ?? ''} ${toLang?.name ?? to}`, color: 'border-amber-500/40 bg-amber-500/10' },
+  ];
+
+  // Add usage tips based on target language
+  const tips: Record<string, string> = {
+    hi: 'Hindi uses Devanagari script. Formal address uses "आप" (aap), informal uses "तुम" (tum).',
+    mr: 'Marathi is the official language of Maharashtra. It shares Devanagari script with Hindi.',
+    ja: 'Japanese has 3 scripts: Hiragana, Katakana, and Kanji. Politeness levels matter greatly.',
+    ar: 'Arabic is written right-to-left. Modern Standard Arabic differs from spoken dialects.',
+    zh_Hans: 'Mandarin Chinese uses tones — the same syllable with different tones has different meanings.',
+    ko: 'Korean (Hangul) has formal and informal speech levels called "존댓말" (jondaemal).',
+    ru: 'Russian uses the Cyrillic alphabet and has 6 grammatical cases.',
+    fr: 'French has gendered nouns (masculine/feminine) and liaison rules between words.',
+    de: 'German has 3 genders (der/die/das) and 4 grammatical cases.',
+    es: 'Spanish has two forms of "you": formal "usted" and informal "tú".',
+  };
+
+  const tipKey = to.replace('-', '_');
+  if (tips[tipKey]) {
+    cards.push({ label: '💡 Language Tip', value: tips[tipKey], color: 'border-cyan-500/40 bg-cyan-500/10' });
+  }
+
+  return cards;
+}
+
+function buildAssistantContent(text: string, translated: string, provider: string): string {
+  return `Here's your translation powered by **${provider}**:\n\n"${translated}"\n\nClick the cards below for details. You can also tap 🔊 to hear the pronunciation.`;
+}
+
+// ── Quick phrase suggestions ──────────────────────────────────────────────────
+
+const QUICK_PHRASES = [
+  'Hello, how are you?',
+  'Thank you very much',
+  'Where is the nearest hospital?',
+  'I need help please',
+  'What is your name?',
+  'Good morning!',
+];
+
+// ── Component ─────────────────────────────────────────────────────────────────
 
 export function AIAssistantPage() {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: '1',
-      role: 'assistant',
-      content: '👋 Hello! I\'m your AI translation assistant. I can help you understand words, phrases, and their cultural context. Just type any word or phrase you\'d like to learn about!',
-      timestamp: new Date(),
-    }
-  ]);
+  const [messages, setMessages] = useState<Message[]>([{
+    id: '1',
+    role: 'assistant',
+    content: 'Hello! I\'m your **AI Translation Assistant** powered by Google Translate.\n\nType any text below and I\'ll translate it with full details — language tips, word count, pronunciation and more. I support **20+ languages** including Hindi, Marathi, Japanese, Arabic and more!',
+    timestamp: new Date(),
+  }]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [sourceLang, setSourceLang] = useState('en');
-  const [targetLang, setTargetLang] = useState('es');
+  const [targetLang, setTargetLang] = useState('hi');
+  const [copied, setCopied] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
-    scrollToBottom();
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const handleSend = async () => {
-    if (!input.trim()) return;
+  const handleSend = async (textOverride?: string) => {
+    const text = (textOverride ?? input).trim();
+    if (!text) return;
 
-    const userMessage: Message = {
+    const userMsg: Message = {
       id: Date.now().toString(),
       role: 'user',
-      content: input,
+      content: text,
       timestamp: new Date(),
     };
-
-    setMessages(prev => [...prev, userMessage]);
+    setMessages(prev => [...prev, userMsg]);
     setInput('');
     setIsTyping(true);
 
     try {
-      const response = await fetch(
-        `https://${projectId}.supabase.co/functions/v1/make-server-e0a50523/ai-assistant`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${publicAnonKey}`
-          },
-          body: JSON.stringify({
-            text: input,
-            sourceLang: sourceLang,
-            targetLang: targetLang
-          })
-        }
-      );
+      const { translated, provider } = await performTranslation(text, sourceLang, targetLang);
 
-      const data = await response.json();
+      // Save to history
+      appendTranslationHistory({
+        source: text,
+        translation: translated,
+        sourceLang,
+        targetLang,
+      });
 
-      let responseContent = `🌍 **Translation**\n\n`;
-      responseContent += `📝 **Original** (${data.sourceLanguage}): "${data.originalText}"\n`;
-      responseContent += `✨ **Translated** (${data.targetLanguage}): "${data.translatedText}"\n\n`;
-      
-      if (data.detailedInfo) {
-        const info = data.detailedInfo;
-        
-        responseContent += `📚 **Detailed Information**\n\n`;
-        responseContent += `**Type:** ${info.type}\n`;
-        responseContent += `**Definition:** ${info.definition}\n\n`;
-        
-        if (info.usage) responseContent += `**Usage:** ${info.usage}\n`;
-        if (info.context) responseContent += `**Context:** ${info.context}\n`;
-        if (info.formality) responseContent += `**Formality:** ${info.formality}\n`;
-        if (info.pronunciation) responseContent += `**Pronunciation:** ${info.pronunciation}\n`;
-        if (info.partOfSpeech) responseContent += `**Part of Speech:** ${info.partOfSpeech}\n\n`;
-        
-        if (info.examples && info.examples.length > 0) {
-          responseContent += `**Examples:**\n`;
-          info.examples.forEach((example: string, idx: number) => {
-            responseContent += `${idx + 1}. ${example}\n`;
-          });
-          responseContent += `\n`;
-        }
-        
-        if (info.synonyms && info.synonyms.length > 0) {
-          responseContent += `**Synonyms:** ${info.synonyms.join(', ')}\n\n`;
-        }
-        
-        if (info.cultural) {
-          responseContent += `**Cultural Note:** ${info.cultural}\n`;
-        }
-      }
-
-      const assistantMessage: Message = {
+      const assistantMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: responseContent,
-        detailedInfo: data.detailedInfo,
+        content: buildAssistantContent(text, translated, provider),
+        translation: translated,
+        provider,
         timestamp: new Date(),
+        cards: buildInfoCards(text, translated, sourceLang, targetLang),
       };
 
       setTimeout(() => {
-        setMessages(prev => [...prev, assistantMessage]);
+        setMessages(prev => [...prev, assistantMsg]);
         setIsTyping(false);
-      }, 500);
-    } catch (error) {
-      console.error('AI Assistant error:', error);
-      const errorMessage: Message = {
+      }, 400);
+    } catch (err: any) {
+      setMessages(prev => [...prev, {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: '❌ Sorry, I encountered an error. Please try again!',
+        content: `❌ **Translation failed:** ${err.message}\n\nPlease check your internet connection and try again.`,
         timestamp: new Date(),
-      };
-      setMessages(prev => [...prev, errorMessage]);
+      }]);
       setIsTyping(false);
-      toast.error('Failed to get AI response');
+      toast.error('Translation failed', { description: err.message });
     }
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
+  const handleSpeak = (text: string, lang: string) => {
+    if (!('speechSynthesis' in window)) { toast.error('TTS not supported'); return; }
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = lang;
+    u.rate = 0.88;
+    window.speechSynthesis.speak(u);
+    toast.info('🔊 Playing…');
+  };
+
+  const handleCopy = (text: string, id: string) => {
+    navigator.clipboard.writeText(text);
+    setCopied(id);
+    toast.success('Copied!');
+    setTimeout(() => setCopied(null), 2000);
+  };
+
+  const handleSwap = () => {
+    setSourceLang(targetLang);
+    setTargetLang(sourceLang);
   };
 
   return (
-    <div className="container mx-auto px-4 py-8 max-w-6xl relative">
-      {/* Floating Cartoon Characters */}
-      <div className="hidden lg:block">
-        <div className="fixed top-32 left-10 z-0">
-          <FloatingCharacter delay={0} />
-        </div>
-        <div className="fixed top-64 right-10 z-0">
-          <FloatingCharacter delay={1} />
-        </div>
-        <div className="fixed bottom-32 left-20 z-0">
-          <FloatingCharacter delay={2} />
-        </div>
-      </div>
+    <div className="container mx-auto px-4 py-8 max-w-5xl relative z-10">
 
-      {/* Hero Section with 3D Animation */}
+      {/* Hero */}
       <motion.div
-        initial={{ opacity: 0, y: 50, rotateX: 20 }}
-        animate={{ opacity: 1, y: 0, rotateX: 0 }}
-        transition={{ duration: 1, type: "spring" }}
-        style={{ transformStyle: 'preserve-3d' }}
-        className="text-center mb-12 relative z-10"
+        initial={{ opacity: 0, y: 30 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.7 }}
+        className="text-center mb-8"
       >
         <motion.div
-          animate={{
-            y: [0, -10, 0],
-            rotateY: [0, 5, -5, 0]
-          }}
+          animate={{ y: [0, -8, 0], rotateY: [0, 6, -6, 0] }}
           transition={{ duration: 4, repeat: Infinity }}
-          className="inline-block mb-6"
+          className="inline-block mb-5"
         >
-          <div className="w-32 h-32 rounded-3xl bg-gradient-to-br from-purple-500 via-pink-500 to-blue-500 flex items-center justify-center shadow-2xl">
-            <Bot className="w-16 h-16 text-white" />
+          <div className="w-24 h-24 rounded-3xl bg-gradient-to-br from-purple-500 via-pink-500 to-blue-500 flex items-center justify-center shadow-2xl shadow-purple-500/40">
+            <Bot className="w-12 h-12 text-white" />
           </div>
         </motion.div>
-
-        <h1 
-          className="text-5xl md:text-7xl font-normal text-white mb-4"
+        <h1
+          className="text-4xl sm:text-6xl font-normal text-white mb-3 tracking-tight"
           style={{ fontFamily: "'Instrument Serif', serif" }}
         >
-          AI Translation <em className="not-italic text-purple-400">Assistant</em>
+          AI Translation{' '}
+          <em className="not-italic" style={{
+            background: 'linear-gradient(90deg,#a78bfa,#ec4899)',
+            WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
+          }}>Assistant</em>
         </h1>
-        <p className="text-white/70 text-lg max-w-2xl mx-auto">
-          Your intelligent companion for understanding languages, cultures, and context
+        <p className="text-white/60 text-base max-w-xl mx-auto">
+          Powered by Google Translate · 20+ languages · Pronunciation · Cultural tips
         </p>
       </motion.div>
 
-      {/* Language Selectors with 3D effect */}
-      <ScrollCard3D index={0}>
-        <motion.div 
-          className="flex items-center justify-center gap-4 mb-8"
-          whileHover={{ scale: 1.05 }}
-        >
-          <div className="glass-card rounded-full p-4 flex items-center gap-4">
-            <Globe className="w-5 h-5 text-blue-400" />
-            <Select value={sourceLang} onValueChange={setSourceLang}>
-              <SelectTrigger className="bg-transparent border-0 text-white w-40">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent className="bg-slate-900/95 backdrop-blur-xl border-white/20">
-                {languages.map((lang) => (
-                  <SelectItem key={lang.code} value={lang.code} className="text-white hover:bg-white/10">
-                    <span className="flex items-center gap-2">
-                      <span>{lang.flag}</span>
-                      <span>{lang.name}</span>
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            
-            <motion.div
-              animate={{ rotate: [0, 180, 360] }}
-              transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
-            >
-              <Zap className="w-5 h-5 text-yellow-400" />
-            </motion.div>
+      {/* Language selector bar */}
+      <motion.div
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.2 }}
+        className="flex items-center justify-center gap-3 mb-6 flex-wrap"
+      >
+        <div className="glass-card rounded-2xl px-4 py-3 flex items-center gap-3" style={{ backdropFilter: 'blur(24px)', background: 'rgba(15,23,42,0.6)' }}>
+          <Globe className="w-4 h-4 text-blue-400 shrink-0" />
+          <Select value={sourceLang} onValueChange={setSourceLang}>
+            <SelectTrigger className="bg-transparent border-0 text-white w-36 h-8 p-0 focus:ring-0">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="bg-slate-900/95 backdrop-blur-xl border-white/20 max-h-64">
+              {languages.map(l => (
+                <SelectItem key={l.code} value={l.code} className="text-white hover:bg-white/10">
+                  <span className="flex items-center gap-2"><span>{l.flag}</span><span>{l.name}</span></span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
 
-            <Select value={targetLang} onValueChange={setTargetLang}>
-              <SelectTrigger className="bg-transparent border-0 text-white w-40">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent className="bg-slate-900/95 backdrop-blur-xl border-white/20">
-                {languages.map((lang) => (
-                  <SelectItem key={lang.code} value={lang.code} className="text-white hover:bg-white/10">
-                    <span className="flex items-center gap-2">
-                      <span>{lang.flag}</span>
-                      <span>{lang.name}</span>
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </motion.div>
-      </ScrollCard3D>
-
-      {/* Chat Container with 3D Scroll Effect */}
-      <ScrollCard3D index={1}>
-        <div className="glass-card rounded-3xl p-6 mb-6 relative overflow-hidden">
-          {/* Animated background gradient */}
-          <motion.div
-            animate={{
-              backgroundPosition: ['0% 0%', '100% 100%', '0% 0%']
-            }}
-            transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
-            className="absolute inset-0 bg-gradient-to-br from-blue-500/5 via-purple-500/5 to-pink-500/5"
-            style={{ backgroundSize: '200% 200%' }}
-          />
-
-          {/* Messages */}
-          <div 
-            ref={containerRef}
-            className="h-[500px] overflow-y-auto mb-4 space-y-4 custom-scrollbar relative z-10"
+          <motion.button
+            whileHover={{ scale: 1.15, rotate: 180 }}
+            whileTap={{ scale: 0.9 }}
+            transition={{ type: 'spring', stiffness: 300 }}
+            onClick={handleSwap}
+            className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-colors"
           >
-            {messages.map((message, index) => (
+            <ArrowRightLeft className="w-4 h-4" />
+          </motion.button>
+
+          <Select value={targetLang} onValueChange={setTargetLang}>
+            <SelectTrigger className="bg-transparent border-0 text-white w-36 h-8 p-0 focus:ring-0">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="bg-slate-900/95 backdrop-blur-xl border-white/20 max-h-64">
+              {languages.map(l => (
+                <SelectItem key={l.code} value={l.code} className="text-white hover:bg-white/10">
+                  <span className="flex items-center gap-2"><span>{l.flag}</span><span>{l.name}</span></span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </motion.div>
+
+      {/* Quick phrases */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.3 }}
+        className="flex flex-wrap gap-2 justify-center mb-6"
+      >
+        {QUICK_PHRASES.map((phrase, i) => (
+          <motion.button
+            key={i}
+            whileHover={{ scale: 1.05, y: -2 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => handleSend(phrase)}
+            className="px-3 py-1.5 rounded-full text-xs text-white/70 hover:text-white border border-white/15 hover:border-white/30 bg-white/5 hover:bg-white/10 transition-all"
+          >
+            {phrase}
+          </motion.button>
+        ))}
+      </motion.div>
+
+      {/* Chat window */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.35 }}
+        className="glass-card rounded-3xl overflow-hidden mb-4"
+        style={{ backdropFilter: 'blur(28px)', background: 'rgba(15,23,42,0.65)' }}
+      >
+        {/* Messages */}
+        <div className="h-[480px] overflow-y-auto p-5 space-y-5 custom-scrollbar">
+          <AnimatePresence initial={false}>
+            {messages.map((msg) => (
               <motion.div
-                key={message.id}
-                initial={{ opacity: 0, x: message.role === 'user' ? 50 : -50, scale: 0.8 }}
-                animate={{ opacity: 1, x: 0, scale: 1 }}
-                transition={{ 
-                  type: "spring",
-                  stiffness: 200,
-                  damping: 20,
-                  delay: index * 0.1
-                }}
-                className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                key={msg.id}
+                initial={{ opacity: 0, y: 16, scale: 0.96 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                transition={{ type: 'spring', stiffness: 260, damping: 22 }}
+                className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
               >
-                <div className={`flex items-start gap-3 max-w-[80%] ${message.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
-                  {/* Avatar with 3D effect */}
-                  <motion.div
-                    whileHover={{ 
-                      scale: 1.2, 
-                      rotate: [0, -10, 10, 0],
-                      transition: { duration: 0.5 }
-                    }}
-                    className={`
-                      w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0
-                      ${message.role === 'user'
-                        ? 'bg-gradient-to-br from-blue-500 to-cyan-500'
-                        : 'bg-gradient-to-br from-purple-500 to-pink-500'
-                      }
-                    `}
-                  >
-                    {message.role === 'user' ? (
-                      <User className="w-5 h-5 text-white" />
-                    ) : (
-                      <Brain className="w-5 h-5 text-white" />
+                {msg.role === 'assistant' && (
+                  <div className="w-9 h-9 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center shrink-0 mt-1 shadow-lg shadow-purple-500/30">
+                    <Brain className="w-4 h-4 text-white" />
+                  </div>
+                )}
+
+                <div className={`max-w-[78%] space-y-3 ${msg.role === 'user' ? 'items-end' : 'items-start'} flex flex-col`}>
+                  {/* Bubble */}
+                  <div className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+                    msg.role === 'user'
+                      ? 'bg-gradient-to-br from-blue-500/25 to-cyan-500/25 border border-blue-500/30 text-white'
+                      : 'bg-white/5 border border-white/10 text-white/90'
+                  }`}>
+                    {msg.content.split('**').map((part, i) =>
+                      i % 2 === 0
+                        ? <span key={i}>{part}</span>
+                        : <strong key={i} className="text-purple-300 font-semibold">{part}</strong>
                     )}
-                  </motion.div>
+                  </div>
 
-                  {/* Message Bubble */}
-                  <motion.div
-                    whileHover={{ scale: 1.02, y: -2 }}
-                    className={`
-                      rounded-2xl p-4 
-                      ${message.role === 'user'
-                        ? 'bg-gradient-to-br from-blue-500/20 to-cyan-500/20 border border-blue-500/30'
-                        : 'glass-card'
-                      }
-                    `}
-                  >
-                    <div className="text-white text-sm leading-relaxed whitespace-pre-wrap">
-                      {message.content.split('**').map((part, i) => 
-                        i % 2 === 0 ? part : <strong key={i} className="text-purple-300">{part}</strong>
-                      )}
+                  {/* Info cards */}
+                  {msg.cards && msg.cards.length > 0 && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full">
+                      {msg.cards.map((card, ci) => (
+                        <motion.div
+                          key={ci}
+                          initial={{ opacity: 0, y: 8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: ci * 0.07 }}
+                          className={`rounded-xl p-3 border text-xs ${card.color}`}
+                        >
+                          <div className="text-white/60 font-medium mb-1">{card.label}</div>
+                          <div className="text-white font-medium leading-relaxed">{card.value}</div>
+                          {/* Action buttons on translation card */}
+                          {ci === 1 && msg.translation && (
+                            <div className="flex gap-2 mt-2">
+                              <button
+                                onClick={() => handleSpeak(msg.translation!, targetLang)}
+                                className="flex items-center gap-1 px-2 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-colors"
+                              >
+                                <Volume2 className="w-3 h-3" />
+                                <span>Speak</span>
+                              </button>
+                              <button
+                                onClick={() => handleCopy(msg.translation!, msg.id)}
+                                className="flex items-center gap-1 px-2 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-colors"
+                              >
+                                {copied === msg.id
+                                  ? <><Check className="w-3 h-3 text-green-400" /><span className="text-green-400">Copied</span></>
+                                  : <><Copy className="w-3 h-3" /><span>Copy</span></>
+                                }
+                              </button>
+                            </div>
+                          )}
+                        </motion.div>
+                      ))}
                     </div>
-                    <div className="text-white/40 text-xs mt-2">
-                      {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </div>
-                  </motion.div>
-                </div>
-              </motion.div>
-            ))}
+                  )}
 
-            {/* Typing Indicator */}
-            {isTyping && (
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="flex items-start gap-3"
-              >
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
-                  <Brain className="w-5 h-5 text-white" />
-                </div>
-                <div className="glass-card rounded-2xl p-4">
-                  <div className="flex gap-2">
-                    {[0, 1, 2].map((i) => (
-                      <motion.div
-                        key={i}
-                        animate={{
-                          y: [0, -10, 0],
-                          opacity: [0.5, 1, 0.5]
-                        }}
-                        transition={{
-                          duration: 1,
-                          repeat: Infinity,
-                          delay: i * 0.2
-                        }}
-                        className="w-2 h-2 bg-purple-400 rounded-full"
-                      />
-                    ))}
+                  <div className="text-white/30 text-xs px-1">
+                    {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    {msg.provider && <span className="ml-2 text-green-400/60">· {msg.provider}</span>}
                   </div>
                 </div>
+
+                {msg.role === 'user' && (
+                  <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center shrink-0 mt-1 shadow-lg shadow-blue-500/30">
+                    <User className="w-4 h-4 text-white" />
+                  </div>
+                )}
               </motion.div>
-            )}
+            ))}
+          </AnimatePresence>
 
-            <div ref={messagesEndRef} />
-          </div>
-
-          {/* Input Area */}
-          <div className="flex gap-3 relative z-10">
-            <Textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyPress={handleKeyPress}
-              placeholder="Ask me about any word or phrase..."
-              className="flex-1 bg-white/5 border-white/10 text-white placeholder:text-white/40 rounded-2xl resize-none h-14"
-              rows={1}
-            />
-            <motion.div whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
-              <Button
-                onClick={handleSend}
-                disabled={!input.trim() || isTyping}
-                className="h-14 px-6 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white rounded-2xl"
-              >
-                <Send className="w-5 h-5" />
-              </Button>
-            </motion.div>
-          </div>
-        </div>
-      </ScrollCard3D>
-
-      {/* Feature Cards with 3D Scroll */}
-      <div className="grid md:grid-cols-3 gap-6 mt-12">
-        {[
-          {
-            icon: BookOpen,
-            title: 'Detailed Definitions',
-            description: 'Get comprehensive meanings and usage examples',
-            color: 'from-blue-500 to-cyan-500'
-          },
-          {
-            icon: Globe,
-            title: 'Cultural Context',
-            description: 'Understand cultural nuances and appropriateness',
-            color: 'from-purple-500 to-pink-500'
-          },
-          {
-            icon: Wand2,
-            title: 'Smart Learning',
-            description: 'Synonyms, pronunciation, and part of speech',
-            color: 'from-green-500 to-emerald-500'
-          }
-        ].map((feature, index) => (
-          <ScrollCard3D key={index} index={index + 2}>
+          {/* Typing indicator */}
+          {isTyping && (
             <motion.div
-              whileHover={{ 
-                scale: 1.05,
-                rotateY: 10,
-                z: 50
-              }}
-              style={{ transformStyle: 'preserve-3d' }}
-              className="glass-card rounded-2xl p-6 text-center"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex gap-3 items-start"
             >
-              <motion.div
-                animate={{
-                  rotate: [0, 360],
-                  scale: [1, 1.2, 1]
-                }}
-                transition={{
-                  duration: 4,
-                  repeat: Infinity,
-                  ease: "easeInOut"
-                }}
-                className={`w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br ${feature.color} flex items-center justify-center`}
-              >
-                <feature.icon className="w-8 h-8 text-white" />
-              </motion.div>
-              <h3 className="text-white font-semibold text-lg mb-2">{feature.title}</h3>
-              <p className="text-white/60 text-sm">{feature.description}</p>
+              <div className="w-9 h-9 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center shrink-0">
+                <Brain className="w-4 h-4 text-white" />
+              </div>
+              <div className="bg-white/5 border border-white/10 rounded-2xl px-4 py-3 flex items-center gap-1.5">
+                {[0, 1, 2].map(i => (
+                  <motion.div
+                    key={i}
+                    animate={{ y: [0, -6, 0], opacity: [0.4, 1, 0.4] }}
+                    transition={{ duration: 0.8, repeat: Infinity, delay: i * 0.15 }}
+                    className="w-2 h-2 bg-purple-400 rounded-full"
+                  />
+                ))}
+                <span className="text-white/40 text-xs ml-2">Translating…</span>
+              </div>
             </motion.div>
-          </ScrollCard3D>
+          )}
+
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* Input bar */}
+        <div className="border-t border-white/10 p-4 flex gap-3">
+          <Textarea
+            ref={inputRef}
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+            placeholder={`Type in ${languages.find(l => l.code === sourceLang)?.name ?? 'any language'}… (Enter to send)`}
+            className="flex-1 bg-white/5 border-white/10 text-white placeholder:text-white/35 rounded-2xl resize-none min-h-[52px] max-h-32 focus-visible:ring-purple-500/40"
+            rows={1}
+          />
+          <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+            <Button
+              onClick={() => handleSend()}
+              disabled={!input.trim() || isTyping}
+              className="h-[52px] px-5 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white rounded-2xl shadow-lg shadow-purple-500/30 disabled:opacity-40"
+            >
+              {isTyping ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
+            </Button>
+          </motion.div>
+        </div>
+      </motion.div>
+
+      {/* Feature cards */}
+      <div className="grid sm:grid-cols-3 gap-4 mt-6">
+        {[
+          { icon: Languages, title: '20+ Languages', desc: 'Hindi, Marathi, Japanese, Arabic & more', color: 'from-blue-500 to-cyan-500' },
+          { icon: BookOpen,  title: 'Rich Details',  desc: 'Language tips, word count, cultural context', color: 'from-purple-500 to-pink-500' },
+          { icon: Wand2,     title: 'Pronunciation', desc: 'Hear any translation spoken aloud', color: 'from-green-500 to-emerald-500' },
+        ].map((f, i) => (
+          <motion.div
+            key={i}
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.5 + i * 0.1 }}
+            whileHover={{ scale: 1.04, y: -4 }}
+            className="glass-card rounded-2xl p-5 text-center"
+            style={{ backdropFilter: 'blur(20px)', background: 'rgba(15,23,42,0.5)' }}
+          >
+            <div className={`w-12 h-12 mx-auto mb-3 rounded-xl bg-gradient-to-br ${f.color} flex items-center justify-center shadow-lg`}>
+              <f.icon className="w-6 h-6 text-white" />
+            </div>
+            <h3 className="text-white font-semibold text-sm mb-1">{f.title}</h3>
+            <p className="text-white/50 text-xs">{f.desc}</p>
+          </motion.div>
         ))}
       </div>
     </div>
