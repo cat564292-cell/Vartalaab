@@ -25,6 +25,7 @@ import { ScriptKeypad, KEYPAD_LANGS } from '../components/ScriptKeypad';
 import { translateRapidApi } from '/utils/rapidApiTranslate';
 import { translateMyMemory, toMyMemoryCode } from '/utils/translateMyMemory';
 import { appendTranslationHistory } from '/utils/translationHistory';
+import { translateViaSpringBoot, checkBackendHealth } from '/utils/springApi';
 
 const languages = [
   { code: 'auto', name: 'Auto Detect', flag: '🌐' },
@@ -77,17 +78,21 @@ function Card3D({ children, className = '' }: { children: React.ReactNode; class
   );
 }
 
-async function doTranslate(text: string, from: string, to: string): Promise<string> {
-  // Try RapidAPI first (key is set in .env)
+async function doTranslate(text: string, from: string, to: string): Promise<{ text: string; provider: string }> {
+  // 1. Try Spring Boot backend (handles DB save + RapidAPI)
+  try {
+    const r = await translateViaSpringBoot(text, from, to, false);
+    return { text: r.translatedText, provider: r.provider };
+  } catch { /* fall through */ }
+  // 2. RapidAPI direct
   try {
     const r = await translateRapidApi(text, from, to);
-    return r.translatedText;
-  } catch (e) {
-    console.warn('[translate] RapidAPI failed, falling back to MyMemory:', e);
-  }
-  // Fallback: MyMemory (free, no key)
+    return { text: r.translatedText, provider: 'rapidapi' };
+  } catch { /* fall through */ }
+  // 3. MyMemory free fallback
   const fromCode = from === 'auto' ? 'en' : toMyMemoryCode(from);
-  return translateMyMemory(text, fromCode, to);
+  const t = await translateMyMemory(text, fromCode, to);
+  return { text: t, provider: 'mymemory' };
 }
 
 export function HomePage() {
@@ -101,7 +106,12 @@ export function HomePage() {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [showMicPermissionDialog, setShowMicPermissionDialog] = useState(false);
   const [activeMode, setActiveMode] = useState<'standard' | 'smart' | 'compare'>('standard');
+  const [backendOnline, setBackendOnline] = useState(false);
   const recognitionRef = useRef<any>(null);
+
+  useEffect(() => {
+    checkBackendHealth().then(setBackendOnline);
+  }, []);
 
   useEffect(() => {
     if (!sourceText.trim()) { setTranslatedText(''); return; }
@@ -134,8 +144,12 @@ export function HomePage() {
     setIsTranslating(true);
     try {
       const result = await doTranslate(sourceText, sourceLang, targetLang);
-      setTranslatedText(result);
-      appendTranslationHistory({ source: sourceText, translation: result, sourceLang, targetLang });
+      setTranslatedText(result.text);
+      // Save to Spring Boot DB if online, else localStorage
+      if (backendOnline) {
+        try { await translateViaSpringBoot(sourceText, sourceLang, targetLang, true); } catch { /* ignore */ }
+      }
+      appendTranslationHistory({ source: sourceText, translation: result.text, sourceLang, targetLang });
     } catch (err: any) {
       toast.error('Translation failed', { description: err.message });
     } finally {
@@ -144,7 +158,10 @@ export function HomePage() {
   };
 
   // Expose translateText for AIComparison / SmartSuggestions
-  const translateText = async (text: string, from: string, to: string) => doTranslate(text, from, to);
+  const translateText = async (text: string, from: string, to: string) => {
+    const r = await doTranslate(text, from, to);
+    return r.text;
+  };
 
   const handleSwapLanguages = () => {
     if (sourceLang === 'auto') { toast.error('Cannot swap from Auto Detect'); return; }
@@ -218,8 +235,10 @@ export function HomePage() {
             style={{
               position: 'absolute', inset: 0, width: '100%', height: '100%',
               objectFit: 'cover', objectPosition: 'center',
-              filter: 'brightness(0.45) contrast(1.18) saturate(1.2)',
-            }}
+              filter: 'brightness(0.48) contrast(1.22) saturate(1.35)',
+              imageRendering: 'high-quality',
+              transform: 'scale(1.001)',
+            } as React.CSSProperties}
           >
             <source src="https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260217_030345_246c0224-10a4-422c-b324-070b7c0eceda.mp4" type="video/mp4" />
           </video>
@@ -262,6 +281,10 @@ export function HomePage() {
           <p className="text-white/70 text-base sm:text-lg max-w-2xl mx-auto">
             Powered by advanced AI · 20+ languages · Real-time voice translation
           </p>
+          <div className="mt-3 flex items-center justify-center gap-2 text-xs">
+            <span className={`w-2 h-2 rounded-full ${backendOnline ? 'bg-green-400' : 'bg-yellow-400'}`} />
+            <span className="text-white/50">{backendOnline ? 'Spring Boot DB connected' : 'Offline mode — localStorage only'}</span>
+          </div>
         </motion.div>
 
         {/* Mode Tabs */}
@@ -296,7 +319,16 @@ export function HomePage() {
         <AnimatePresence mode="wait">
           {activeMode === 'smart' ? (
             <motion.div key="smart" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}>
-              <SmartSuggestions onAcceptSuggestion={(t) => { setSourceText(t); toast.success('Suggestion accepted!'); }} targetLang={targetLang} />
+              <SmartSuggestions
+            onAcceptSuggestion={(t) => {
+              setSourceText(t);
+              setActiveMode('standard');
+              toast.success('Suggestion accepted! Translating…');
+            }}
+            targetLang={targetLang}
+            sourceLang={sourceLang}
+            onTranslate={translateText}
+          />
             </motion.div>
           ) : activeMode === 'compare' ? (
             <motion.div key="compare" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}>

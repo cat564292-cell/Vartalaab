@@ -1,24 +1,18 @@
 import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Sparkles, ArrowRight, CheckCircle2, Zap, Wand2, RefreshCw } from 'lucide-react';
+import { Sparkles, ArrowRight, CheckCircle2, Zap, Wand2, RefreshCw, Languages } from 'lucide-react';
 import { Button } from './ui/button';
 import { ScriptKeypad, KEYPAD_LANGS } from './ScriptKeypad';
-
-interface Suggestion {
-  id: string;
-  text: string;
-  type: 'grammar' | 'autocomplete' | 'synonym' | 'ai';
-  label: string;
-}
+import { fetchSmartSuggestions, checkBackendHealth, type Suggestion } from '/utils/springApi';
 
 interface SmartSuggestionsProps {
   onAcceptSuggestion: (text: string) => void;
   targetLang: string;
+  sourceLang?: string;
+  onTranslate?: (text: string, from: string, to: string) => Promise<string>;
 }
 
-const BACKEND = 'http://localhost:8000';
-
-// Local fallback grammar rules (mirrors backend)
+// Local fallback grammar rules
 const GRAMMAR_RULES: [RegExp, string, string][] = [
   [/\bhe go\b/gi, 'he goes', 'Subject-verb agreement'],
   [/\bshe go\b/gi, 'she goes', 'Subject-verb agreement'],
@@ -35,13 +29,13 @@ const GRAMMAR_RULES: [RegExp, string, string][] = [
 ];
 
 const AUTOCOMPLETE: Record<string, string[]> = {
-  'how are': ['how are you?', 'how are you doing?'],
+  'how are':  ['how are you?', 'how are you doing?'],
   'thank you': ['thank you very much', 'thank you for your help'],
-  'i would': ['I would like to', 'I would appreciate it'],
-  'nice to': ['nice to meet you', 'nice to see you again'],
-  'good': ['good morning', 'good afternoon', 'good evening'],
-  'see you': ['see you later', 'see you soon'],
-  'can you': ['can you help me?', 'can you please explain?'],
+  'i would':  ['I would like to', 'I would appreciate it'],
+  'nice to':  ['nice to meet you', 'nice to see you again'],
+  'good':     ['good morning', 'good afternoon', 'good evening'],
+  'see you':  ['see you later', 'see you soon'],
+  'can you':  ['can you help me?', 'can you please explain?'],
 };
 
 const SYNONYMS: Record<string, string[]> = {
@@ -71,7 +65,8 @@ function localSuggest(text: string): Suggestion[] {
   for (const [trigger, completions] of Object.entries(AUTOCOMPLETE)) {
     if (lower.endsWith(trigger) || lower.includes(trigger + ' ')) {
       completions.slice(0, 1).forEach((c, i) => {
-        if (!lower.includes(c)) suggestions.push({ id: `auto-${i}`, type: 'autocomplete', text: c, label: 'Autocomplete' });
+        if (!lower.includes(c))
+          suggestions.push({ id: `auto-${i}`, type: 'autocomplete', text: c, label: 'Autocomplete' });
       });
     }
   }
@@ -83,8 +78,7 @@ function localSuggest(text: string): Suggestion[] {
       seen.add(word);
       const syn = SYNONYMS[word][0];
       suggestions.push({
-        id: `syn-${word}`,
-        type: 'synonym',
+        id: `syn-${word}`, type: 'synonym',
         text: text.replace(new RegExp(`\\b${word}\\b`, 'i'), syn),
         label: `Replace '${word}' → '${syn}'`,
       });
@@ -93,39 +87,42 @@ function localSuggest(text: string): Suggestion[] {
   return suggestions.slice(0, 5);
 }
 
-const TYPE_CONFIG = {
-  grammar:    { icon: CheckCircle2, color: 'bg-red-500/20 text-red-400 border-red-500/30' },
-  autocomplete: { icon: ArrowRight, color: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
-  synonym:    { icon: Sparkles, color: 'bg-green-500/20 text-green-400 border-green-500/30' },
-  ai:         { icon: Wand2, color: 'bg-purple-500/20 text-purple-400 border-purple-500/30' },
+const TYPE_CONFIG: Record<string, { icon: any; color: string }> = {
+  grammar:      { icon: CheckCircle2, color: 'bg-red-500/20 text-red-400 border-red-500/30' },
+  autocomplete: { icon: ArrowRight,   color: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
+  synonym:      { icon: Sparkles,     color: 'bg-green-500/20 text-green-400 border-green-500/30' },
+  ai:           { icon: Wand2,        color: 'bg-purple-500/20 text-purple-400 border-purple-500/30' },
 };
 
-export function SmartSuggestions({ onAcceptSuggestion, targetLang }: SmartSuggestionsProps) {
+export function SmartSuggestions({
+  onAcceptSuggestion,
+  targetLang,
+  sourceLang = 'auto',
+  onTranslate,
+}: SmartSuggestionsProps) {
   const [input, setInput] = useState('');
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [backendOnline, setBackendOnline] = useState(false);
+  const [liveTranslation, setLiveTranslation] = useState('');
+  const [isTranslating, setIsTranslating] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // Check if backend is online
+  // Check Spring Boot health
   useEffect(() => {
-    fetch(`${BACKEND}/health`).then(() => setBackendOnline(true)).catch(() => setBackendOnline(false));
+    checkBackendHealth().then(setBackendOnline);
   }, []);
 
+  // Smart suggestions (Spring Boot or local fallback)
   useEffect(() => {
     if (!input.trim()) { setSuggestions([]); return; }
     setIsAnalyzing(true);
     const timer = setTimeout(async () => {
       if (backendOnline) {
         try {
-          const res = await fetch(`${BACKEND}/smart-suggest`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: input, targetLang }),
-          });
-          const data = await res.json();
-          setSuggestions(data.suggestions || []);
+          const results = await fetchSmartSuggestions(input, targetLang);
+          setSuggestions(results);
         } catch {
           setSuggestions(localSuggest(input));
         }
@@ -137,6 +134,23 @@ export function SmartSuggestions({ onAcceptSuggestion, targetLang }: SmartSugges
     }, 350);
     return () => clearTimeout(timer);
   }, [input, targetLang, backendOnline]);
+
+  // Live translation preview
+  useEffect(() => {
+    if (!input.trim() || !onTranslate) { setLiveTranslation(''); return; }
+    const t = setTimeout(async () => {
+      setIsTranslating(true);
+      try {
+        const result = await onTranslate(input, sourceLang, targetLang);
+        setLiveTranslation(result);
+      } catch {
+        setLiveTranslation('');
+      } finally {
+        setIsTranslating(false);
+      }
+    }, 900);
+    return () => clearTimeout(t);
+  }, [input, sourceLang, targetLang]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (!suggestions.length) return;
@@ -160,6 +174,7 @@ export function SmartSuggestions({ onAcceptSuggestion, targetLang }: SmartSugges
   return (
     <div className="w-full max-w-4xl mx-auto">
       <div className="glass-card rounded-3xl p-6 sm:p-8 relative" style={{ backdropFilter: 'blur(28px)', background: 'rgba(15,23,42,0.6)' }}>
+
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
@@ -173,7 +188,7 @@ export function SmartSuggestions({ onAcceptSuggestion, targetLang }: SmartSugges
             <div>
               <h3 className="text-white font-semibold text-lg">Smart Translator</h3>
               <p className="text-white/50 text-xs">
-                {backendOnline ? '🟢 AI backend connected' : '🟡 Local mode (start backend for AI)'}
+                {backendOnline ? '🟢 Spring Boot DB connected' : '🟡 Local mode — start Spring Boot for DB'}
               </p>
             </div>
           </div>
@@ -194,7 +209,7 @@ export function SmartSuggestions({ onAcceptSuggestion, targetLang }: SmartSugges
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Start typing to see AI-powered suggestions…"
+            placeholder="Start typing to see AI-powered suggestions and live translation…"
             className="w-full h-44 bg-white/5 border-2 border-white/10 focus:border-purple-500/50 rounded-2xl p-5 text-white text-base resize-none outline-none transition-colors"
             style={{ caretColor: '#a78bfa' }}
           />
@@ -208,6 +223,31 @@ export function SmartSuggestions({ onAcceptSuggestion, targetLang }: SmartSugges
           ))}
         </div>
 
+        {/* Live translation preview */}
+        <AnimatePresence>
+          {(liveTranslation || isTranslating) && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 8 }}
+              className="mb-4 p-4 rounded-2xl border border-blue-500/30 bg-blue-500/10"
+            >
+              <div className="flex items-center gap-2 mb-2">
+                <Languages className="w-4 h-4 text-blue-400" />
+                <span className="text-blue-300 text-xs font-medium">Live Translation Preview</span>
+                {isTranslating && (
+                  <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}>
+                    <RefreshCw className="w-3 h-3 text-blue-400" />
+                  </motion.div>
+                )}
+              </div>
+              <p className="text-white text-sm leading-relaxed">
+                {isTranslating ? <span className="text-white/40">Translating…</span> : liveTranslation}
+              </p>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* Suggestions */}
         <AnimatePresence>
           {suggestions.length > 0 && (
@@ -217,7 +257,7 @@ export function SmartSuggestions({ onAcceptSuggestion, targetLang }: SmartSugges
                 <span>Suggestions — ↑↓ navigate · Ctrl+Enter accept · Esc dismiss</span>
               </div>
               {suggestions.map((s, i) => {
-                const cfg = TYPE_CONFIG[s.type] || TYPE_CONFIG.autocomplete;
+                const cfg = TYPE_CONFIG[s.type] ?? TYPE_CONFIG.autocomplete;
                 const Icon = cfg.icon;
                 return (
                   <motion.div
@@ -228,7 +268,9 @@ export function SmartSuggestions({ onAcceptSuggestion, targetLang }: SmartSugges
                     onClick={() => accept(s)}
                     onMouseEnter={() => setSelectedIndex(i)}
                     className={`flex items-center gap-3 p-4 rounded-xl cursor-pointer transition-all border
-                      ${selectedIndex === i ? 'ring-2 ring-purple-500 bg-purple-500/10 border-purple-500/30' : 'border-white/8 hover:bg-white/5'}`}
+                      ${selectedIndex === i
+                        ? 'ring-2 ring-purple-500 bg-purple-500/10 border-purple-500/30'
+                        : 'border-white/[0.08] hover:bg-white/5'}`}
                   >
                     <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 border ${cfg.color}`}>
                       <Icon className="w-4 h-4" />
@@ -245,9 +287,9 @@ export function SmartSuggestions({ onAcceptSuggestion, targetLang }: SmartSugges
           )}
         </AnimatePresence>
 
-        {/* Accept button */}
+        {/* Translate This button */}
         {input.trim() && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mt-4 flex justify-end">
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mt-5 flex justify-end">
             <Button
               onClick={() => onAcceptSuggestion(input)}
               className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white rounded-xl px-6"
@@ -259,7 +301,7 @@ export function SmartSuggestions({ onAcceptSuggestion, targetLang }: SmartSugges
         )}
 
         <p className="mt-4 text-white/30 text-xs text-center">
-          Type in any language · Grammar fixes · Autocomplete · Synonym suggestions
+          Grammar fixes · Autocomplete · Synonyms · Live preview · All scripts supported
         </p>
       </div>
     </div>

@@ -11,11 +11,20 @@ import {
   Filter,
   ChevronDown,
   Sparkles,
-  Globe2
+  Globe2,
+  Database
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { toast } from 'sonner';
+import {
+  fetchHistory,
+  clearAllHistory,
+  deleteHistoryItem,
+  fetchHistoryStats,
+  checkBackendHealth,
+  type HistoryItem,
+} from '/utils/springApi';
 
 interface Translation {
   id: string;
@@ -212,27 +221,59 @@ export function HistoryPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterLang, setFilterLang] = useState<string>('all');
   const [sortBy, setSortBy] = useState<'newest' | 'oldest'>('newest');
+  const [backendOnline, setBackendOnline] = useState(false);
+  const [stats, setStats] = useState({ total: 0, languages: 0 });
 
-  // Load history from localStorage
-  useEffect(() => {
+  const loadFromBackend = async () => {
+    try {
+      const page = await fetchHistory(
+        searchQuery || undefined,
+        filterLang !== 'all' ? filterLang : undefined
+      );
+      setHistory(page.content.map(item => ({
+        id: String(item.id),
+        source: item.sourceText,
+        translation: item.translatedText,
+        sourceLang: item.sourceLang,
+        targetLang: item.targetLang,
+        timestamp: new Date(item.createdAt),
+      })));
+      const s = await fetchHistoryStats();
+      setStats(s);
+    } catch {
+      loadFromLocalStorage();
+    }
+  };
+
+  const loadFromLocalStorage = () => {
     const savedHistory = localStorage.getItem('translation-history');
     if (savedHistory) {
       try {
         const parsed = JSON.parse(savedHistory);
-        setHistory(parsed.map((item: any) => ({
-          ...item,
-          timestamp: new Date(item.timestamp)
-        })));
-      } catch (error) {
-        console.error('Failed to load history:', error);
-      }
+        setHistory(parsed.map((item: any) => ({ ...item, timestamp: new Date(item.timestamp) })));
+      } catch { /* ignore */ }
     }
+  };
+
+  useEffect(() => {
+    checkBackendHealth().then(online => {
+      setBackendOnline(online);
+      if (online) loadFromBackend();
+      else loadFromLocalStorage();
+    });
   }, []);
 
-  const clearHistory = () => {
+  useEffect(() => {
+    if (backendOnline) loadFromBackend();
+  }, [searchQuery, filterLang, backendOnline]);
+
+  const clearHistory = async () => {
+    if (backendOnline) {
+      try { await clearAllHistory(); } catch { /* ignore */ }
+    }
     setHistory([]);
     localStorage.removeItem('translation-history');
-    toast.success('History cleared successfully!');
+    toast.success('History cleared!');
   };
 
   const exportHistory = () => {
@@ -247,9 +288,8 @@ export function HistoryPage() {
   };
 
   const restoreTranslation = (item: Translation) => {
-    toast.success('Translation restored! Navigate to Home to view.');
+    toast.success('Translation copied to clipboard!');
     sessionStorage.setItem('restored-translation', JSON.stringify(item));
-    // Also copy to clipboard for convenience
     navigator.clipboard.writeText(item.translation).catch(() => {});
   };
 
@@ -400,7 +440,7 @@ export function HistoryPage() {
               animate={{ scale: [1, 1.1, 1] }}
               transition={{ duration: 2, repeat: Infinity }}
             >
-              {history.length}
+              {backendOnline ? stats.total : history.length}
             </motion.div>
             <div className="text-white/60 text-sm">Total Translations</div>
           </div>
@@ -410,9 +450,18 @@ export function HistoryPage() {
               animate={{ scale: [1, 1.1, 1] }}
               transition={{ duration: 2, repeat: Infinity, delay: 0.5 }}
             >
-              {sortedHistory.length}
+              {backendOnline ? stats.languages : sortedHistory.length}
             </motion.div>
-            <div className="text-white/60 text-sm">Filtered Results</div>
+            <div className="text-white/60 text-sm">{backendOnline ? 'Languages Used' : 'Filtered Results'}</div>
+          </div>
+          <div className="text-center">
+            <div className="flex items-center gap-1.5 justify-center mb-1">
+              <Database className={`w-4 h-4 ${backendOnline ? 'text-green-400' : 'text-yellow-400'}`} />
+              <span className={`text-sm font-semibold ${backendOnline ? 'text-green-400' : 'text-yellow-400'}`}>
+                {backendOnline ? 'H2 DB' : 'Local'}
+              </span>
+            </div>
+            <div className="text-white/60 text-sm">{backendOnline ? 'Spring Boot' : 'localStorage'}</div>
           </div>
         </div>
       </motion.div>

@@ -101,8 +101,10 @@ export function RootLayout() {
               position: 'absolute', inset: 0,
               width: '100%', height: '100%',
               objectFit: 'cover', objectPosition: 'center',
-              filter: 'brightness(0.42) contrast(1.18) saturate(1.2)',
-            }}
+              filter: 'brightness(0.42) contrast(1.22) saturate(1.35) sharpen(1)',
+              imageRendering: 'high-quality',
+              transform: 'scale(1.001)', // sub-pixel sharpness trick
+            } as React.CSSProperties}
           >
             <source src={CLOUDFRONT_VIDEO} type="video/mp4" />
           </video>
