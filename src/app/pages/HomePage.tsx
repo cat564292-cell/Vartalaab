@@ -22,8 +22,7 @@ import { SmartSuggestions } from '../components/SmartSuggestions';
 import { AIComparison } from '../components/AIComparison';
 import { MicrophonePermissionDialog } from '../components/MicrophonePermissionDialog';
 import { ScriptKeypad, KEYPAD_LANGS } from '../components/ScriptKeypad';
-import { translateRapidApi } from '/utils/rapidApiTranslate';
-import { translateMyMemory, toMyMemoryCode } from '/utils/translateMyMemory';
+import { translateText } from '/utils/rapidApiTranslate';
 import { appendTranslationHistory } from '/utils/translationHistory';
 import { translateViaSpringBoot, checkBackendHealth } from '/utils/springApi';
 
@@ -79,20 +78,14 @@ function Card3D({ children, className = '' }: { children: React.ReactNode; class
 }
 
 async function doTranslate(text: string, from: string, to: string): Promise<{ text: string; provider: string }> {
-  // 1. Try Spring Boot backend (handles DB save + RapidAPI)
+  // 1. Try Spring Boot backend (handles DB save)
   try {
     const r = await translateViaSpringBoot(text, from, to, false);
-    return { text: r.translatedText, provider: r.provider };
+    if (r.translatedText) return { text: r.translatedText, provider: r.provider };
   } catch { /* fall through */ }
-  // 2. RapidAPI direct
-  try {
-    const r = await translateRapidApi(text, from, to);
-    return { text: r.translatedText, provider: 'rapidapi' };
-  } catch { /* fall through */ }
-  // 3. MyMemory free fallback
-  const fromCode = from === 'auto' ? 'en' : toMyMemoryCode(from);
-  const t = await translateMyMemory(text, fromCode, to);
-  return { text: t, provider: 'mymemory' };
+  // 2. Direct engine chain: Google unofficial → MyMemory → RapidAPI → LibreTranslate
+  const r = await translateText(text, from, to);
+  return { text: r.translatedText, provider: r.provider };
 }
 
 export function HomePage() {
@@ -158,7 +151,7 @@ export function HomePage() {
   };
 
   // Expose translateText for AIComparison / SmartSuggestions
-  const translateText = async (text: string, from: string, to: string) => {
+  const translateFn = async (text: string, from: string, to: string) => {
     const r = await doTranslate(text, from, to);
     return r.text;
   };
@@ -235,7 +228,7 @@ export function HomePage() {
             style={{
               position: 'absolute', inset: 0, width: '100%', height: '100%',
               objectFit: 'cover', objectPosition: 'center',
-              filter: 'brightness(0.48) contrast(1.22) saturate(1.35)',
+              filter: 'brightness(0.52) contrast(1.25) saturate(1.4)',
               imageRendering: 'high-quality',
               transform: 'scale(1.001)',
             } as React.CSSProperties}
@@ -327,12 +320,12 @@ export function HomePage() {
             }}
             targetLang={targetLang}
             sourceLang={sourceLang}
-            onTranslate={translateText}
+            onTranslate={translateFn}
           />
             </motion.div>
           ) : activeMode === 'compare' ? (
             <motion.div key="compare" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}>
-              <AIComparison onTranslate={translateText} sourceLang={sourceLang} targetLang={targetLang} />
+              <AIComparison onTranslate={translateFn} sourceLang={sourceLang} targetLang={targetLang} />
             </motion.div>
           ) : (
             <motion.div key="standard" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}>

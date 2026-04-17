@@ -101,18 +101,23 @@ export function RootLayout() {
               position: 'absolute', inset: 0,
               width: '100%', height: '100%',
               objectFit: 'cover', objectPosition: 'center',
-              filter: 'brightness(0.42) contrast(1.22) saturate(1.35) sharpen(1)',
+              filter: 'brightness(0.52) contrast(1.25) saturate(1.4)',
               imageRendering: 'high-quality',
-              transform: 'scale(1.001)', // sub-pixel sharpness trick
+              transform: 'scale(1.001)',
             } as React.CSSProperties}
           >
             <source src={CLOUDFRONT_VIDEO} type="video/mp4" />
           </video>
         </motion.div>
-        {/* Vignette */}
+        {/* Vignette + cinematic letterbox */}
         <div className="absolute inset-0 z-[1]" style={{
-          background: 'radial-gradient(ellipse 80% 80% at 50% 50%, transparent 35%, rgba(0,0,0,0.75) 100%)'
+          background: 'radial-gradient(ellipse 85% 75% at 50% 50%, transparent 30%, rgba(0,0,0,0.72) 100%)'
         }} />
+        {/* Top & bottom cinematic bars */}
+        <div className="absolute inset-x-0 top-0 z-[2] h-16 pointer-events-none" style={{ background: 'linear-gradient(to bottom, rgba(0,0,0,0.55) 0%, transparent 100%)' }} />
+        <div className="absolute inset-x-0 bottom-0 z-[2] h-24 pointer-events-none" style={{ background: 'linear-gradient(to top, rgba(2,6,23,0.9) 0%, transparent 100%)' }} />
+        {/* Subtle blue-purple cinematic tint overlay */}
+        <div className="absolute inset-0 z-[1] pointer-events-none" style={{ background: 'linear-gradient(135deg, rgba(59,130,246,0.06) 0%, rgba(139,92,246,0.08) 50%, rgba(236,72,153,0.04) 100%)' }} />
       </div>
 
       {/* ── Ambient colour orbs ── */}
