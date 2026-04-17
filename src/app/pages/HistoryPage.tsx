@@ -248,8 +248,9 @@ export function HistoryPage() {
 
   const restoreTranslation = (item: Translation) => {
     toast.success('Translation restored! Navigate to Home to view.');
-    // Store in session storage for restoration
     sessionStorage.setItem('restored-translation', JSON.stringify(item));
+    // Also copy to clipboard for convenience
+    navigator.clipboard.writeText(item.translation).catch(() => {});
   };
 
   // Filter and search
@@ -438,7 +439,7 @@ export function HistoryPage() {
             <p className="text-white/60">
               {searchQuery || filterLang !== 'all' 
                 ? 'Try adjusting your filters or search query'
-                : 'Start translating to build your history'}
+                : 'Start translating on the Home page to build your history. Every translation is automatically saved here.'}
             </p>
           </motion.div>
         ) : (

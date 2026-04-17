@@ -24,6 +24,7 @@ import { MicrophonePermissionDialog } from '../components/MicrophonePermissionDi
 import { ScriptKeypad, KEYPAD_LANGS } from '../components/ScriptKeypad';
 import { translateRapidApi } from '/utils/rapidApiTranslate';
 import { translateMyMemory, toMyMemoryCode } from '/utils/translateMyMemory';
+import { appendTranslationHistory } from '/utils/translationHistory';
 
 const languages = [
   { code: 'auto', name: 'Auto Detect', flag: '🌐' },
@@ -134,6 +135,7 @@ export function HomePage() {
     try {
       const result = await doTranslate(sourceText, sourceLang, targetLang);
       setTranslatedText(result);
+      appendTranslationHistory({ source: sourceText, translation: result, sourceLang, targetLang });
     } catch (err: any) {
       toast.error('Translation failed', { description: err.message });
     } finally {
